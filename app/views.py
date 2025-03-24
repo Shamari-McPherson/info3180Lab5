@@ -35,47 +35,70 @@ def form_errors(form):
             })
     return error_messages
 
-@app.route('/api/v1/movies', methods=['POST'])
+@app.route('/api/v1/movies', methods=['GET', 'POST'])
 def movies():
-    # Create form instance
-    form = MovieForm()
+    if request.method == 'GET':
+        # Retrieve all movies from the database
+        movies = Movie.query.all()
+        
+        # Convert movies to a list of dictionaries
+        movie_list = []
+        for movie in movies:
+            movie_list.append({
+                'id': movie.id,
+                'title': movie.title,
+                'description': movie.description,
+                'poster': f'/api/v1/posters/{movie.poster}'
+            })
+        
+        # Return the list of movies as JSON
+        return jsonify({'movies': movie_list})
     
-    # Check if form validates
-    if form.validate_on_submit():
-        # Secure filename to prevent directory traversal attacks
-        poster_file = form.poster.data
-        filename = secure_filename(poster_file.filename)
+    elif request.method == 'POST':
+        # Create form instance
+        form = MovieForm()
         
-        # Generate unique filename to prevent overwriting
-        unique_filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+        # Check if form validates
+        if form.validate_on_submit():
+            # Secure filename to prevent directory traversal attacks
+            poster_file = form.poster.data
+            filename = secure_filename(poster_file.filename)
+            
+            # Generate unique filename to prevent overwriting
+            unique_filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+            
+            # Save the file to uploads folder
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            poster_file.save(file_path)
+            
+            # Create new movie record
+            new_movie = Movie(
+                title=form.title.data,
+                description=form.description.data,
+                poster=unique_filename
+            )
+            
+            # Add and commit to database
+            db.session.add(new_movie)
+            db.session.commit()
+            
+            # Return success response
+            return jsonify({
+                'message': 'Movie Successfully added',
+                'title': new_movie.title,
+                'poster': unique_filename,
+                'description': new_movie.description
+            }), 201
         
-        # Save the file to uploads folder
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-        poster_file.save(file_path)
-        
-        # Create new movie record
-        new_movie = Movie(
-            title=form.title.data,
-            description=form.description.data,
-            poster=unique_filename
-        )
-        
-        # Add and commit to database
-        db.session.add(new_movie)
-        db.session.commit()
-        
-        # Return success response
+        # If validation fails, return errors
         return jsonify({
-            'message': 'Movie Successfully added',
-            'title': new_movie.title,
-            'poster': unique_filename,
-            'description': new_movie.description
-        }), 201
-    
-    # If validation fails, return errors
-    return jsonify({
-        'errors': form_errors(form)
-    }), 400
+            'errors': form_errors(form)
+        }), 400
+
+# Add a route to serve poster images
+@app.route('/api/v1/posters/<filename>')
+def get_poster(filename):
+    return send_file(os.path.join(app.config['UPLOAD_FOLDER'], filename))
 ###
 # The functions below should be applicable to all Flask apps.
 ###
