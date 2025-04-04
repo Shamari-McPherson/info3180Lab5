@@ -5,13 +5,14 @@ Werkzeug Documentation:  https://werkzeug.palletsprojects.com/
 This file creates your application.
 """
 
-from app import app
-from flask import render_template, request, jsonify, send_file
+from app import app, db
+from flask import render_template, request, jsonify, send_from_directory
 import os
 from werkzeug.utils import secure_filename
 from datetime import datetime
 from .models import Movie
 from .forms import MovieForm
+from flask_wtf.csrf import generate_csrf
 
 ###
 # Routing for your application.
@@ -22,20 +23,19 @@ def index():
     return jsonify(message="This is the beginning of our API")
 
 def form_errors(form):
-    """
-    Collects form errors and returns them as a list of dictionaries.
-    Each dictionary represents a field with its corresponding error messages.
-    """
     error_messages = []
+    """Collects form errors"""
     for field, errors in form.errors.items():
         for error in errors:
-            error_messages.append({
-                'field': field,
-                'message': error
-            })
+            message = u"Error in the %s field - %s" % (
+                    getattr(form, field).label.text,
+                    error
+                )
+            error_messages.append(message)
+
     return error_messages
 
-@app.route('/api/v1/movies', methods=['GET', 'POST'])
+@app.route('/api/v1/movies', methods=['POST'])
 def movies():
     if request.method == 'GET':
         # Retrieve all movies from the database
@@ -61,6 +61,7 @@ def movies():
         # Check if form validates
         if form.validate_on_submit():
             # Secure filename to prevent directory traversal attacks
+            
             poster_file = form.poster.data
             filename = secure_filename(poster_file.filename)
             
@@ -86,7 +87,7 @@ def movies():
             return jsonify({
                 'message': 'Movie Successfully added',
                 'title': new_movie.title,
-                'poster': unique_filename,
+                'poster': new_movie.poster,
                 'description': new_movie.description
             }), 201
         
@@ -96,9 +97,9 @@ def movies():
         }), 400
 
 # Add a route to serve poster images
-@app.route('/api/v1/posters/<filename>')
-def get_poster(filename):
-    return send_file(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+@app.route("/api/v1/posters/<filename>")
+def get_posters(filename):
+    return send_from_directory(os.path.join(os.getcwd(), app.config['UPLOAD_FOLDER']), filename), 200
 ###
 # The functions below should be applicable to all Flask apps.
 ###
@@ -117,6 +118,11 @@ def form_errors(form):
             error_messages.append(message)
 
     return error_messages
+
+@app.route('/api/v1/csrf-token', methods=['GET'])
+def get_csrf():
+    return jsonify({'csrf_token': generate_csrf()}), 200
+
 
 @app.route('/<file_name>.txt')
 def send_text_file(file_name):
