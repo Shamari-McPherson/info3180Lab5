@@ -35,7 +35,7 @@ def form_errors(form):
 
     return error_messages
 
-@app.route('/api/v1/movies', methods=['POST'])
+@app.route('/api/v1/movies', methods=['POST', 'GET'])
 def movies():
     if request.method == 'GET':
         # Retrieve all movies from the database
@@ -55,46 +55,90 @@ def movies():
         return jsonify({'movies': movie_list})
     
     elif request.method == 'POST':
-        # Create form instance
-        form = MovieForm()
-        
-        # Check if form validates
-        if form.validate_on_submit():
-            # Secure filename to prevent directory traversal attacks
+        try:
+            # Print raw request data for debugging
+            print("==== REQUEST DATA ====")
+            print("Form data:", dict(request.form))
+            print("Files:", request.files)
+            print("Headers:", dict(request.headers))
             
+            # Create form instance
+            form = MovieForm()
+            
+            print("==== FORM VALIDATION ====")
+            valid = form.validate_on_submit()
+            print(f"Form valid: {valid}")
+            
+            if not valid:
+                print("Validation errors:", form.errors)
+                # Check for CSRF errors specifically
+                if 'csrf_token' in form.errors:
+                    print("CSRF error:", form.errors['csrf_token'])
+                    
+                return jsonify({
+                    'errors': form_errors(form)
+                }), 400
+            
+            print("==== PROCESSING FORM ====")
+            print(f"Title: {form.title.data}")
+            print(f"Description: {form.description.data}")
+            
+            # Handle poster file
             poster_file = form.poster.data
             filename = secure_filename(poster_file.filename)
+            print(f"Original filename: {filename}")
             
-            # Generate unique filename to prevent overwriting
+            # Generate unique filename
             unique_filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+            print(f"Generated filename: {unique_filename}")
             
-            # Save the file to uploads folder
+            # Save the file
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
             poster_file.save(file_path)
+            print(f"File saved to: {file_path}")
             
-            # Create new movie record
-            new_movie = Movie(
-                title=form.title.data,
-                description=form.description.data,
-                poster=unique_filename
-            )
-            
-            # Add and commit to database
-            db.session.add(new_movie)
-            db.session.commit()
-            
-            # Return success response
-            return jsonify({
-                'message': 'Movie Successfully added',
-                'title': new_movie.title,
-                'poster': new_movie.poster,
-                'description': new_movie.description
-            }), 201
-        
-        # If validation fails, return errors
-        return jsonify({
-            'errors': form_errors(form)
-        }), 400
+            try:
+                print("==== DATABASE OPERATION ====")
+                # Create new movie with debugging info
+                print("Creating movie object...")
+                new_movie = Movie(
+                    title=form.title.data,
+                    description=form.description.data,
+                    poster=unique_filename
+                )
+                
+                print(f"Movie object created: {new_movie.title}")
+                
+                # Add and commit to database
+                print("Adding to session...")
+                db.session.add(new_movie)
+                print("Committing...")
+                db.session.commit()
+                print("Database commit successful")
+                
+                return jsonify({
+                    'message': 'Movie Successfully added',
+                    'title': new_movie.title,
+                    'poster': new_movie.poster,
+                    'description': new_movie.description
+                }), 201
+                
+            except Exception as db_error:
+                print("==== DATABASE ERROR ====")
+                print(f"Error: {str(db_error)}")
+                print("Stack trace:")
+                import traceback
+                traceback.print_exc()
+                db.session.rollback()
+                return jsonify({'errors': [f"Database error: {str(db_error)}"]}), 500
+                
+        except Exception as e:
+            print("==== SERVER ERROR ====")
+            print(f"Error: {str(e)}")
+            print("Stack trace:")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'errors': [f"Server error: {str(e)}"]}), 500
 
 # Add a route to serve poster images
 @app.route("/api/v1/posters/<filename>")

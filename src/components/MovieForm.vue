@@ -47,27 +47,35 @@
 </template>
 
 <script setup>
+// In MovieForm.vue script section
 import { ref, onMounted, nextTick, defineEmits } from "vue";
 
 const emit = defineEmits(["flashMessage"]);
-
 const title = ref("");
 const description = ref("");
 const poster = ref(null);
 const fileInput = ref(null);
-
 const csrf_token = ref("");
 const successMessage = ref("");
 const errors = ref([]);
 
-// Fetch CSRF token
+// Fetch CSRF token more reliably
 function getCsrfToken() {
   fetch("/api/v1/csrf-token")
-    .then((res) => res.json())
-    .then((data) => {
+    .then(res => {
+      if (!res.ok) {
+        throw new Error(`Failed to fetch CSRF token: ${res.status}`);
+      }
+      return res.json();
+    })
+    .then(data => {
+      console.log("CSRF token received");
       csrf_token.value = data.csrf_token;
     })
-    .catch((error) => console.log("Error fetching CSRF token:", error));
+    .catch(error => {
+      console.error("Error fetching CSRF token:", error);
+      errors.value = ["Failed to fetch CSRF token. Please refresh the page."];
+    });
 }
 
 onMounted(() => {
@@ -81,42 +89,88 @@ function handleFileChange(event) {
 function saveMovie() {
   errors.value = [];
   successMessage.value = "";
-
+  
+  // Validate form data
+  if (!title.value) {
+    errors.value.push("Title is required");
+    return;
+  }
+  
+  if (!description.value) {
+    errors.value.push("Description is required");
+    return;
+  }
+  
+  if (!poster.value) {
+    errors.value.push("Poster image is required");
+    return;
+  }
+  
+  if (!csrf_token.value) {
+    console.error("No CSRF token available");
+    errors.value.push("Security token missing. Please refresh the page.");
+    return;
+  }
+  
+  console.log("Creating FormData...");
   const form_data = new FormData();
+  form_data.append("csrf_token", csrf_token.value);
   form_data.append("title", title.value);
   form_data.append("description", description.value);
-  if (poster.value) {
-    form_data.append("poster", poster.value);
-  }
-
+  form_data.append("poster", poster.value);
+  
+  console.log("Submitting form with data:", {
+    title: title.value,
+    description: description.value,
+    poster: poster.value.name,
+    csrf_token: csrf_token.value.substring(0, 10) + "..." // Only log part of the token for security
+  });
+  
   fetch("/api/v1/movies", {
     method: "POST",
     body: form_data,
-    headers: {
-      "X-CSRFToken": csrf_token.value,
-    },
+    credentials: 'same-origin'
   })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data.errors) {
-        errors.value = data.errors;
-        emit("flashMessage", errors.value);
-      } else {
-        successMessage.value = "Movie added successfully!";
-        emit("flashMessage", successMessage.value);
-        resetForm();
+  .then(response => {
+    console.log("Response status:", response.status);
+    // Get response text for any status code
+    return response.text().then(text => {
+      // Try to parse as JSON if possible
+      try {
+        const data = JSON.parse(text);
+        return { ok: response.ok, data };
+      } catch (e) {
+        // If not JSON, return the raw text
+        return { ok: response.ok, text };
       }
-    })
-    .catch((error) => {
-      console.log("Error:", error);
     });
+  })
+  .then(result => {
+    if (!result.ok) {
+      console.error("Error response:", result.text || result.data);
+      throw new Error(`Server returned ${result.ok ? "success" : "error"}`);
+    }
+    
+    console.log("Success:", result.data);
+    if (result.data.errors) {
+      errors.value = result.data.errors;
+      emit("flashMessage", errors.value);
+    } else {
+      successMessage.value = "Movie added successfully!";
+      emit("flashMessage", successMessage.value);
+      resetForm();
+    }
+  })
+  .catch(error => {
+    console.error("Error:", error);
+    errors.value = [`Failed to submit form: ${error.message}`];
+  });
 }
 
 function resetForm() {
   title.value = "";
   description.value = "";
   poster.value = null;
-
   nextTick(() => {
     if (fileInput.value) {
       fileInput.value.value = null;
